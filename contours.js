@@ -24,14 +24,13 @@ var lines = [
 ]
 
 var nhcRadii = [
+    0, // Dummy radius
     26 * 1852,
     43 * 1852,
     56 * 1852,
     74 * 1852,
     103 * 1852
-]
-// Convert pixels to meters for projection
-nhcRadii = nhcRadii.map(x => x/2200)
+].map(x => x/2200);
 var width = 800,
     height = 500;
 
@@ -46,15 +45,15 @@ var path = d3.geoPath().projection(projection);
 for (i = 0; i < lines.length; i++) {
     for (j = 0; j < 2; j++) {
         lines[i][j] = projection(lines[i][j]);
-    }
-}
+    };
+};
 function pointDistance(point1, point2) {
     [x, y] = point1;
     [xx, yy] = point2;
     dx = x - xx;
     dy = y - yy;
     return Math.sqrt(dx * dx + dy * dy);
-}
+};
 
 function distance(point, start, end) {
     // https://stackoverflow.com/questions/849211/shortest-distance-between-a-point-and-a-line-segment
@@ -91,33 +90,36 @@ function distance(point, start, end) {
         distance: pointDistance([x, y], [xx, yy]),
         point: [xx, yy] 
     }
-}
-
+};
 
 function minDistance(point) {
     var min = Infinity;
     for (var i = 0; i < lines.length; i++) {
         var line = lines[i],
-            radius = nhcRadii[i];
+            radius = nhcRadii[i+1];
         var start = line[0],
             end = line[1];
+
+        // Distance to closest point and the closest point
         var d_obj = distance(point, start, end);
+
         var d = d_obj.distance;
-        var dist_start_intersect = pointDistance(start, d_obj.point);
+        var dist_start_intersect = pointDistance(start, d_obj.point); 
         var line_distance = pointDistance(start, end);
-        var radius_diff = (nhcRadii[i+1] - nhcRadii[i])
+        var radius_diff = (nhcRadii[i+2] - nhcRadii[i+1])
+
         radius = radius + (radius_diff * (dist_start_intersect/line_distance));
 
         if (d < min && d < radius) {
             min = d;
-        }
-    }
+        };
+    };
     if (min === Infinity) {
-        return 0;
+        return -1;
     } else {
         return min;
-    }
-}
+    };
+};
 
 
 values = new Array(width * height);
@@ -125,12 +127,16 @@ for (var j = 0, k = 0; j < height; ++j) {
     for (var i = 0; i < width; ++i, ++k) {
         values[k] = minDistance([i, j]) 
     }
-}
-console.log(d3.extent(values));
-var color = d3.scaleSequential(d3.interpolateMagma)
-      .domain(d3.extent(values));
+};
 
-var thresholds = [0.000001, 1, 5, 10, 20, 40, 60];
+function color(thresholdValue) {
+    return d3.hsv(0, 1 - thresholdValue/100, 1);
+};
+
+var thresholds = []
+for (var i = 0; i < 10; i++) {
+    thresholds.push(i * 10);
+};
 var con = d3.contours().size([width, height]).thresholds(thresholds)(values);
 d3.json("states.json", function(error, data) {
     if (error) throw error;
@@ -154,5 +160,39 @@ d3.json("states.json", function(error, data) {
                 .attr("stroke", "white")
                 .attr("stroke-width", 0);
         }
-    }
+    };
+    // Draw points for each 12hr forecast
+    d3.select("svg").selectAll("dot")
+        .data(points).enter()
+        .append("circle")
+        .attr("cx", function(d) { 
+            return projection(d)[0];
+        })
+        .attr("cy", function(d) { 
+            return projection(d)[1];
+        })
+        .attr("r", "8px")
+        .attr("fill", "red");
+    // Draw lines connecting the points
+    d3.select("svg").selectAll("lines")
+        .data(lines).enter()
+        .append("line")
+        .attr("x1", function(d) {
+            var p = d[0];
+            return p[0];
+        })
+        .attr("y1", function(d) {
+            var p = d[0];
+            return p[1];
+        })
+        .attr("x2", function(d) {
+            var p = d[1];
+            return p[0];
+        }) 
+        .attr("y2", function(d) {
+            var p = d[1];
+            return p[1];
+        })
+        .attr("stroke-width", 2)
+        .attr("stroke", "red");
 });
