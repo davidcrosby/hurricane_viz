@@ -5,10 +5,10 @@ class point {
     }
 
     sub(p) {
-        return point([this.x - p.x, this.y - p.y]);
+        return new point([this.x - p.x, this.y - p.y]);
     }
     add(p) {
-        return point([this.x + p.x, this.y + p.y]);
+        return new point([this.x + p.x, this.y + p.y]);
     }
 
     scale(factor) {
@@ -23,21 +23,21 @@ class line {
         this.start = start;
         this.end = end;
         this.range = range;
+        this.length = (range[1] - range[0]);
     }
 
     definedAt(time) {
-        var normalizedTime = (time - this.range[0]);
-        if (normalizedTime < range) {
+        if (this.range[0] <= time && this.range[1] >= time) {
             return true;
         } else {
             return false;
         }
     }
     valueAt(time) {
-        var displacement = this.end.sub(start);
-        var timeRange = this.range[1] - this.range[0];
+        var displacement = this.end.sub(this.start);
         var normalizedTime = (time - this.range[0]);
-        return start.add(displacement.scale(normalizedTime/timeRange));
+        displacement.scale(normalizedTime/this.length);
+        return this.start.add(displacement);
     };
 };
 
@@ -82,15 +82,14 @@ function readData(data) {
                     var startTime = parseInt(property);
                     var startPoint = new point(latlong2longlat(object[property].split(" ")));
                     if (!firstLineDrawn) { // Add line to measuredStart
-                        console.log(property);
                         var ms = new point(latlong2longlat(measuredStart));
-                        window.lines.push(new line(ms, startPoint, startTime))
+                        window.lines.push(new line(ms, startPoint, [0,startTime]))
                         firstLineDrawn = true;
                     }
                     var endTime = findNextValidPoint(startTime, object);
                     if (endTime != "") {
                         var endPoint = new point(latlong2longlat(object[endTime].split(" ")));
-                        window.lines.push(new line(startPoint, endPoint, (parseInt(endTime) - startTime)));
+                        window.lines.push(new line(startPoint, endPoint, [startTime, parseInt(endTime)]));
                         
                         desc.push(object);
                     } else {
@@ -100,14 +99,21 @@ function readData(data) {
             };
         };
     });
-    window.lines.forEach(function(line, i) {
-        // look for outlier
-        var end = projection([line.end.x, line.end.y]);
-        if (end[0] > width) {
-            console.log(line);
-        }
-    });
+    generateSamplePoints(window.lines);
 };
+
+function generateSamplePoints(lines) {
+    var output = []
+    for (var t = 0; t < 120; t += 0.5) {
+        lines.forEach(function(line) {
+            if(line.definedAt(t)) {
+                p = line.valueAt(t);
+                output.push([p.x, p.y]);
+            };
+        });
+    };
+    return output;
+}
 
 function latlong2longlat(point) {
     // Also converts west to east
@@ -137,6 +143,18 @@ d3.json("../shapefiles/land.json", function(error, data) {
         .attr("d", path(data))
         .style("fill", "lightblue");
 
+    d3.select("svg").selectAll("dot")
+        .data(generateSamplePoints(lines)).enter()
+        .append("circle")
+        .attr("cx", function(d) { 
+            return projection(d)[0];
+        })
+        .attr("cy", function(d) { 
+            return projection(d)[1];
+        })
+        .attr("r", "1px")
+        .attr("fill", "red");
+    /*
     d3.select("svg").selectAll("lines")
         .data(lines).enter()
         .append("line")
@@ -159,5 +177,6 @@ d3.json("../shapefiles/land.json", function(error, data) {
         })
         .attr("stroke-width", 1)
         .attr("stroke", "red")
+        */
 });
 
