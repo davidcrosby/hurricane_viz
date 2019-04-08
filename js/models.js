@@ -61,15 +61,11 @@ function findNextValidPoint(startTime, object) {
     return "";
 }
 function readData(data) {
+    // TODO: rewrite this and clean it up
     var dataObject = d3.dsvFormat("|").parse(data);
+    // window makes it global even tho its defined inside a function
+    // i don't wanna stack braces if i can avoid it in a small program
     window.lines = [] // Models -> Piecewise linear functions
-    // testing
-    var desc = [];
-    //
-    timestamps = [];
-    for (var i = 1; i <= 20; i++) {
-        timestamps.push(String(i*6));
-    }
     dataObject.forEach(function(object) {
         var firstLineDrawn = false;
         for (var property in object) {
@@ -91,7 +87,6 @@ function readData(data) {
                         var endPoint = new point(latlong2longlat(object[endTime].split(" ")));
                         window.lines.push(new line(startPoint, endPoint, [startTime, parseInt(endTime)]));
                         
-                        desc.push(object);
                     } else {
                         continue;
                     };
@@ -99,7 +94,6 @@ function readData(data) {
             };
         };
     });
-    generateSamplePoints(window.lines);
 };
 
 function generateSamplePoints(lines) {
