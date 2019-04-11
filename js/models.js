@@ -2,19 +2,24 @@ class point {
     constructor(arr) {
         this.x = parseFloat(arr[0]);
         this.y = parseFloat(arr[1]);
-    }
+    };
 
     sub(p) {
         return new point([this.x - p.x, this.y - p.y]);
-    }
+    };
+
     add(p) {
         return new point([this.x + p.x, this.y + p.y]);
-    }
+    };
 
     scale(factor) {
         this.x = this.x * factor;
         this.y = this.y * factor;
-    }
+    };
+
+    samplePointsBy(delta) {
+        pass
+    };
 }
 
 class line {
@@ -60,11 +65,11 @@ function findNextValidPoint(startTime, object) {
     }
     return "";
 }
+
 function readData(data) {
     // TODO: rewrite this and clean it up
     var dataObject = d3.dsvFormat("|").parse(data);
     // window makes it global even tho its defined inside a function
-    // i don't wanna stack braces if i can avoid it in a small program
     window.lines = [] // Models -> Piecewise linear functions
     dataObject.forEach(function(object) {
         var firstLineDrawn = false;
@@ -98,7 +103,7 @@ function readData(data) {
 
 function generateSamplePoints(lines) {
     var output = []
-    for (var t = 0; t < 120; t += 0.5) {
+    for (var t = 0; t < 120; t += 0.1) {
         lines.forEach(function(line) {
             if(line.definedAt(t)) {
                 p = line.valueAt(t);
@@ -109,10 +114,63 @@ function generateSamplePoints(lines) {
     return output;
 }
 
+function generateSamplePointsDistance(lines) {
+    // TODO
+    var delta = [0.1, 0.1];
+    return
+}
+
+function splattingMap(points, width, height) {
+    map = new Array();
+    for (var i = 0; i < width; i++) {
+        map[i] = new Array();
+        for (var j=0; j < height; j++) {
+            map[i][j] = 0;
+        }
+    }
+   
+    points.forEach(function(p) {
+        // Splat and record
+        var x = Math.round(p[0]),
+            y = Math.round(p[1]);
+
+        // how big of a grid to alter values around x,y
+        var splat_size = 16;
+        if(x < splat_size/2 || y < splat_size/2) 
+            return;
+        
+        var gridx = x-splat_size/2;
+            gridy = y-splat_size/2;
+        var rect = splat_size;
+
+        // add 1 to each square going in 1 layer at a time
+        while(gridx <= x && gridy <= y) {
+            for(var i = gridx; i <= gridx + rect; i++) {
+                for(var j = gridy; j <= gridy + rect; j++) {
+                    map[i][j] += 1;
+                };
+            };
+            rect -= 2;
+            gridx += 1;
+            gridy += 1;
+        };
+    });
+    return map;
+};
+
+function sum(array) {
+    var s = 0;
+    array.forEach(function(x) {
+        s += x;
+    });
+    return s
+}
+
 function latlong2longlat(point) {
     // Also converts west to east
     return [-point[1], point[0]];
-}
+};
+
 // d3 Settings
 var width = 1000,
     height = 600;
@@ -123,11 +181,12 @@ var centerCoords = [15, 85]
 var projection = d3.geoEquirectangular()
     .center(latlong2longlat(centerCoords))
     .scale(1400);
-    //.postclip(d3.geoClipRectangle(-70, 15, -95, 45));
 
 var path = d3.geoPath().projection(projection);
 
-
+function color(thresholdValue, max, index) {
+    return d3.hsv(0, 1, .65 + (thresholdValue/max));
+};
 d3.json("../shapefiles/land.json", function(error, data) {
     if (error) throw error;
     d3.select("svg")
@@ -137,6 +196,56 @@ d3.json("../shapefiles/land.json", function(error, data) {
         .attr("d", path(data))
         .style("fill", "lightblue");
 
+    var points = generateSamplePoints(window.lines).map(x => projection(x));
+    var map = splattingMap(points, width, height);
+    var debuggingZeros = new Array();
+    for(var i = width/2 - 40; i < width/2 + 40; i++) {
+        for (var j = height/2 - 20; j < height/2 + 20; j++) {
+            if(map[i][j] == 0) {
+                debuggingZeros.push([i, j])
+            }
+        }
+    }
+    values = new Array(width * height);
+    for (var i = 0; i < width; ++i) {
+        for(var j = 0; j < height; ++j) {
+            values[i + j * width] = map[i][j];
+        };
+    };
+    thresholds = new Array();
+    thresholds.push(1);
+    
+    var interpv = d3.interpolateNumber(d3.min(values), d3.max(values))
+    for (var j = 0.1; j <= 1; j+=0.1) {
+        thresholds.push(interpv(j));
+    }
+    var con = d3.contours().size([width, height]).thresholds(thresholds)(values);
+    for (var i = 0; i < con.length; i++) {
+        var polygons = con[i].coordinates;
+        for (var j = 0; j < polygons.length; j++) {
+            var polygon = polygons[j];
+            d3.select("svg")
+                .append("polygon")
+                .attr("points", polygon.map(function(e) {
+                    return e.join(",");
+                }).join(" "))
+                .attr("fill", color(thresholds[i], d3.max(thresholds), i))
+                .attr("stroke", "black")
+                .attr("stroke-width", 0);
+        }
+    };
+    console.log(debuggingZeros);
+    d3.select("svg").data(debuggingZeros).enter()
+        .append("circle")
+        .attr("cx", function(d) {
+            return d[0];
+        })
+        .attr("cy", function(d) {
+            return d[1];
+        })
+        .attr("r", "2px")
+        .attr("fill", "green");
+        /*
     d3.select("svg").selectAll("dot")
         .data(generateSamplePoints(lines)).enter()
         .append("circle")
@@ -148,7 +257,6 @@ d3.json("../shapefiles/land.json", function(error, data) {
         })
         .attr("r", "1px")
         .attr("fill", "red");
-    /*
     d3.select("svg").selectAll("lines")
         .data(lines).enter()
         .append("line")
@@ -170,7 +278,8 @@ d3.json("../shapefiles/land.json", function(error, data) {
 
         })
         .attr("stroke-width", 1)
-        .attr("stroke", "red")
+        .attr("stroke", "blue")
         */
+    
 });
 
