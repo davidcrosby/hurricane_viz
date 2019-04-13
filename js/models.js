@@ -96,47 +96,44 @@ class multiLineCollection {
 
     createSplattingMap() {
         // Sample pts for each track and update the map with their splats
-        var map = new Array(width);
+        var map = {}
         for (var i = 0; i < width; i++) {
-            map[i] = new Array(height);
+            map[i] = {}
             for (var j=0; j < height; j++) {
                 map[i][j] = 0;
             };
         };
 
+        var volume = 4000;
+        var max_size = Math.floor(Math.sqrt(3*volume)) // when height = 1
         this.multiLines.forEach(function(track) {
-            // list of points and their t value
             var trkPoints = track.generateSamplePointsByTime()
             trkPoints.forEach(function(pointTime) {
-                // Splat and record
                 var [p, time] = pointTime
-
-                // Indexable pixel values
                 var [x, y] = projection([p.x, p.y]).map(x => Math.round(x));
-                // how big of a grid to alter values around x,y
-                var max_size = 80;
-                var splat_size = Math.round(1 + (time/120)*max_size);
 
-                // edge case, dont want to try to splat offscreen
-                if(x < splat_size/2 || y < splat_size/2) 
+                // length and width
+                var baseLength = Math.round(1 + (time/120)*max_size);
+
+                // V = lwh/3
+                var height = 3 * volume / (baseLength**2)
+
+                if(x < baseLength/2 || y < baseLength/2) 
                     return;
-                
-                // floor so we can loop over 1 pixel if splat_size = 1
-                var gridx = Math.floor(x-splat_size/2),
-                    gridy = Math.floor(y-splat_size/2);
-                var rect = splat_size;
+                var gridx = x - Math.round(x-baseLength/2),
+                    gridy = y - Math.round(y-baseLength/2);
 
-                // add 1 to each square going in 1 layer at a time
-                // very naive
-                while(gridx <= x && gridy <= y) {
-                    for(var i = gridx; i <= gridx + rect; i++) {
-                        for(var j = gridy; j <= gridy + rect; j++) {
-                            map[i][j] += 1;
-                        };
+                var pointDistance = function(x1, y1, x2, y2) {
+                    return Math.sqrt((x1-x2)**2 + (y1-y2)**2);
+                };
+                var heightInterpolater = d3.interpolateNumber(0, height);
+                var maxDistance = pd ? pd : 1;
+                for(var i = x - gridx; i <= x + gridx; i++) {
+                    for(var j = y - gridy; j <= y + gridy; j++) {
+                        var pd = pointDistance(i, j, x, y);
+                        var d = pd ? pd : 1;
+                        map[i][j] += heightInterpolater(d/maxDistance);
                     };
-                    rect -= 2;
-                    gridx += 1;
-                    gridy += 1;
                 };
             });
         });
@@ -227,8 +224,9 @@ var projection = d3.geoEquirectangular()
 
 var path = d3.geoPath().projection(projection);
 
-function color(thresholdValue, max, index) {
-    return d3.hsv(0, 1, .65 + (thresholdValue/max));
+function color(thresholdValue, max, index, count) {
+    var ratio = thresholdValue/max;
+    return d3.hsv(count - index, 1, .65 + ratio);
 };
 
 d3.json("../shapefiles/land.json", function(error, data) {
@@ -248,8 +246,6 @@ d3.json("../shapefiles/land.json", function(error, data) {
         .attr("d", path(data))
         .style("fill", "white");
 
-    // generate points at equidistant TIMES and use splatting to get density map
-    //var points = window.trackCollection.createSplattingMap()//samplePoints().map(x => projection(x));
     var map = window.trackCollection.createSplattingMap();
 
     // construct density values for contour plotting
@@ -264,13 +260,10 @@ d3.json("../shapefiles/land.json", function(error, data) {
     
     // interpolate between [0,1] and the extent of the density values
     var interpv = d3.interpolateNumber(d3.min(values), d3.max(values))
-    for (var j = 0.1; j <= 1; j += .1) {
+    for (var j = 0.1; j <= .8; j += .05) {
         thresholds.push(interpv(j));
     }
-    console.log(thresholds);
-    
     var con = d3.contours().size([width, height]).thresholds(thresholds)(values);
-    console.log(con);
     for (var i = 0; i < con.length; i++) {
         // coordinates is a list of polygons
         con[i].coordinates.forEach(function(polygons){
@@ -281,7 +274,7 @@ d3.json("../shapefiles/land.json", function(error, data) {
                     .attr("points", polygon.map(function(e) {
                         return e.join(",");
                     }).join(" "))
-                    .attr("fill", color(thresholds[i], d3.max(thresholds), i))
+                    .attr("fill", color(thresholds[i], d3.max(thresholds),i,thresholds.length))
                     .attr("stroke", "black")
                     .attr("stroke-width", 1);
             }
@@ -309,7 +302,6 @@ d3.json("../shapefiles/land.json", function(error, data) {
         })
         .attr("r", "1px")
         .attr("fill", "red");
-        */
     window.trackCollection.multiLines.forEach(function(multiLine) {
         d3.select("svg").selectAll("lines")
             .data(multiLine.lines).enter()
@@ -334,6 +326,8 @@ d3.json("../shapefiles/land.json", function(error, data) {
             .attr("stroke-width", 1)
             .attr("stroke", "blue")
     });
+        */
+        
         
     
 });
