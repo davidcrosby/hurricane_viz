@@ -3,7 +3,7 @@ D3 visualization(s) of hurricane forecasts
 
 Data courtesy of:
 
-[Natural Earth - Geo data](naturalearthdata.com)
+[Natural Earth - Geo data](https://www.naturalearthdata.com)
 
 [Tropical Atlantic - Hurricane model data](tropicalatlantic.com)
 
