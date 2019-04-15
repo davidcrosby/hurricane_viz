@@ -1,15 +1,15 @@
-class point {
+class Point {
     constructor(arr) {
         this.x = parseFloat(arr[0]);
         this.y = parseFloat(arr[1]);
     };
 
     sub(p) {
-        return new point([this.x - p.x, this.y - p.y]);
+        return new Point([this.x - p.x, this.y - p.y]);
     };
 
     add(p) {
-        return new point([this.x + p.x, this.y + p.y]);
+        return new Point([this.x + p.x, this.y + p.y]);
     };
 
     scale(factor) {
@@ -22,7 +22,7 @@ class point {
     };
 }
 
-class line {
+class LineSegment {
     constructor(start, end, range) {
         this.start = start;
         this.end = end;
@@ -58,12 +58,14 @@ class multiLine {
     };
 
     genSamplePointsByDistance() {
-        pass;
+        var output = [];
+
+
     };
 
     generateSamplePointsByTime() {
         var output = []
-        for (var t = 0; t < 120; t += 0.1) {
+        for (var t = 0; t < 120; t += 0.5) {
             this.lines.forEach(function(line) {
                 if(line.definedAt(t)) {
                     var p = line.valueAt(t);
@@ -75,7 +77,7 @@ class multiLine {
     }
 }
 
-class multiLineCollection {
+class MultiLineCollection {
     // A collection of multiLines
     constructor(multiLines) {
         this.multiLines = multiLines
@@ -114,26 +116,49 @@ class multiLineCollection {
 
                 // length and width
                 var baseLength = Math.round(1 + (time/120)*max_size);
-
                 // V = lwh/3
                 var height = 3 * volume / (baseLength**2)
-
+                if (baseLength == 1) {
+                    map[x][y] = height;
+                    return;
+                };
                 if(x < baseLength/2 || y < baseLength/2) 
                     return;
-                var gridx = x - Math.round(x-baseLength/2),
-                    gridy = y - Math.round(y-baseLength/2);
-
+                var xDelta = Math.floor(baseLength/2),
+                    yDelta = Math.floor(baseLength/2);
+            
                 var pointDistance = function(x1, y1, x2, y2) {
                     return Math.sqrt((x1-x2)**2 + (y1-y2)**2);
                 };
-                var heightInterpolater = d3.interpolateNumber(0, height);
-                var maxDistance = pd ? pd : 1;
-                for(var i = x - gridx; i <= x + gridx; i++) {
-                    for(var j = y - gridy; j <= y + gridy; j++) {
-                        var pd = pointDistance(i, j, x, y);
-                        var d = pd ? pd : 1;
-                        map[i][j] += heightInterpolater(d/maxDistance);
+
+                var maxDistance = pointDistance(x, y, x-xDelta - 0.5, y-yDelta - 0.5);
+                var layerSize = 2 * xDelta;
+                var xp = x - xDelta,
+                    yp = y - yDelta;
+
+                while(xp <= x && yp <= y) {
+                    // Distance from starting corner to furthest starting corner
+                    if (x != xp && y != yp) {
+                        var pd = pointDistance(xp, yp, x - xDelta - 0.5, y - yDelta - 0.5);
+                    } else {
+                        map[xp][yp] += height;
+                        break;
                     };
+                    for(var i = xp; i <= xp + layerSize; i++) {
+                        for(var j = yp; j <= yp + layerSize; j++) {
+                            if (i != xp && j != yp && i != xp+layerSize && j != yp+layerSize)
+                                continue;
+                            var heightAtThisPoint = height*(pd/maxDistance);
+                            if(map[i][j]) {
+                                map[i][j] += heightAtThisPoint;
+                            } else {
+                                map[i][j] = heightAtThisPoint;
+                            };
+                        };
+                    };
+                    layerSize -= 2;
+                    xp += 1;
+                    yp += 1;
                 };
             });
         });
@@ -162,10 +187,9 @@ function findNextValidPoint(startTime, track) {
 
 function readData(data) {
     // TODO: rewrite this and clean it up
-    // TODO: add a model class containing all lines for a track
     var trackData = d3.dsvFormat("|").parse(data);
     // window makes it global even tho its defined inside a function
-    window.trackCollection = new multiLineCollection([]) // Models -> Piecewise linear functions
+    window.trackCollection = new MultiLineCollection([]) // Models -> Piecewise linear functions
     trackData.forEach(function(track) {
 
         trackLines = []
@@ -181,10 +205,10 @@ function readData(data) {
                     continue; // Skip descriptions and ends
                 } else {
                     var startTime = parseInt(property);
-                    var startPoint = new point(latlong2longlat(track[property].split(" ")));
+                    var startPoint = new Point(latlong2longlat(track[property].split(" ")));
                     if (!firstLineDrawn) { // Add line to measuredStart
-                        var ms = new point(latlong2longlat(measuredStart));
-                        trackLines.push(new line(ms, startPoint, [0,startTime]))
+                        var ms = new Point(latlong2longlat(measuredStart));
+                        trackLines.push(new LineSegment(ms, startPoint, [0,startTime]))
                         firstLineDrawn = true;
                     };
 
@@ -194,8 +218,8 @@ function readData(data) {
 
                     // check if we are at the last point, mainly for tracks that end before t=120
                     if (endTime != "") {
-                        var endPoint = new point(latlong2longlat(track[endTime].split(" ")));
-                        trackLines.push(new line(startPoint, endPoint, [startTime, parseInt(endTime)]));
+                        var endPoint = new Point(latlong2longlat(track[endTime].split(" ")));
+                        trackLines.push(new LineSegment(startPoint, endPoint, [startTime, parseInt(endTime)]));
                     } else {
                         continue;
                     };
@@ -224,9 +248,45 @@ var projection = d3.geoEquirectangular()
 
 var path = d3.geoPath().projection(projection);
 
-function color(thresholdValue, max, index, count) {
-    var ratio = thresholdValue/max;
-    return d3.hsv(count - index, 1, .65 + ratio);
+function thresholdColor(thresholdValue, maxThresholdValue) {
+    var ratio = thresholdValue/maxThresholdValue;
+    return d3.hsv(0, 1, .65 + Math.min(.35, ratio));
+};
+
+function plotContours() {
+    var map = window.trackCollection.createSplattingMap();
+
+    // construct density values for contour plotting
+    var values = new Array(width * height);
+    for (var i = 0; i < width; ++i) {
+        for(var j = 0; j < height; ++j) {
+            values[i + j * width] = map[i][j];
+        };
+    };
+    var thresholds = [];
+    var mean = d3.mean(values);
+    thresholds.push(150);
+    for (var i = 4; i <= 16; i += 4) {
+        thresholds.push(mean * i);
+    };
+    var con = d3.contours().size([width, height]).thresholds(thresholds)(values);
+    for (var i = 0; i < con.length; i++) {
+        // coordinates is a list of polygons
+        con[i].coordinates.forEach(function(polygons){
+            for (var j = 0; j < polygons.length; j++) {
+                var polygon = polygons[j];
+                d3.select("svg")
+                    .append("polygon")
+                    .attr("points", polygon.map(function(e) {
+                        return e.join(",");
+                    }).join(" "))
+                    .attr("fill", thresholdColor(thresholds[i], d3.max(thresholds)))
+                    .attr("stroke", "black")
+                    .attr("stroke-width", 1)
+                    .attr("opacity", .5)
+            }
+        });
+    };
 };
 
 d3.json("../shapefiles/land.json", function(error, data) {
@@ -244,64 +304,11 @@ d3.json("../shapefiles/land.json", function(error, data) {
         .attr("height", height)
         .append("path")
         .attr("d", path(data))
-        .style("fill", "white");
+        .style("fill", d3.hsv(122, .5, .74));
 
-    var map = window.trackCollection.createSplattingMap();
+    plotContours();
 
-    // construct density values for contour plotting
-    values = new Array(width * height);
-    for (var i = 0; i < width; ++i) {
-        for(var j = 0; j < height; ++j) {
-            values[i + j * width] = map[i][j];
-        };
-    };
-    thresholds = new Array();
-    thresholds.push(1);
-    
-    // interpolate between [0,1] and the extent of the density values
-    var interpv = d3.interpolateNumber(d3.min(values), d3.max(values))
-    for (var j = 0.1; j <= .8; j += .05) {
-        thresholds.push(interpv(j));
-    }
-    var con = d3.contours().size([width, height]).thresholds(thresholds)(values);
-    for (var i = 0; i < con.length; i++) {
-        // coordinates is a list of polygons
-        con[i].coordinates.forEach(function(polygons){
-            for (var j = 0; j < polygons.length; j++) {
-                var polygon = polygons[j];
-                d3.select("svg")
-                    .append("polygon")
-                    .attr("points", polygon.map(function(e) {
-                        return e.join(",");
-                    }).join(" "))
-                    .attr("fill", color(thresholds[i], d3.max(thresholds),i,thresholds.length))
-                    .attr("stroke", "black")
-                    .attr("stroke-width", 1);
-            }
-        });
-    };
-        /*
-    d3.select("svg").selectAll("dot").data(debuggingZeros).enter()
-        .append("circle")
-        .attr("cx", function(d) {
-            return d[0];
-        })
-        .attr("cy", function(d) {
-            return d[1];
-        })
-        .attr("r", "2px")
-        .attr("fill", "green");
-    d3.select("svg").selectAll("dot")
-        .data(generateSamplePoints(lines)).enter()
-        .append("circle")
-        .attr("cx", function(d) { 
-            return projection(d)[0];
-        })
-        .attr("cy", function(d) { 
-            return projection(d)[1];
-        })
-        .attr("r", "1px")
-        .attr("fill", "red");
+    /* Code to show the base spaghetti plot
     window.trackCollection.multiLines.forEach(function(multiLine) {
         d3.select("svg").selectAll("lines")
             .data(multiLine.lines).enter()
@@ -321,14 +328,9 @@ d3.json("../shapefiles/land.json", function(error, data) {
             .attr("y2", function(d) {
                 var p = d.end;
                 return projection([p.x, p.y])[1];
-
             })
-            .attr("stroke-width", 1)
+            .attr("stroke-width", 0.4)
             .attr("stroke", "blue")
     });
-        */
-        
-        
-    
+    */
 });
-
