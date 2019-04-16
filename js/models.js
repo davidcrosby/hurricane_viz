@@ -51,21 +51,18 @@ class LineSegment {
 class multiLine {
     // A collection of connected lines representing one bigger line!
     constructor(lines) {
-        // sort by start time
-        this.lines = lines.sort(function(a, b) {
-            return a.start - b.start;
-        });
+        this.lines = lines;
     };
 
-    genSamplePointsByDistance() {
-        var output = [];
-
-
+    genSamplePointsByDistance(distance) {
+        this.lines.forEach(function(line) {
+            var numPoints = 
+        });
     };
 
     generateSamplePointsByTime() {
         var output = []
-        for (var t = 0; t < 120; t += 0.5) {
+        for (var t = 0; t < 120; t += 1) {
             this.lines.forEach(function(line) {
                 if(line.definedAt(t)) {
                     var p = line.valueAt(t);
@@ -127,9 +124,7 @@ class MultiLineCollection {
                 var xDelta = Math.floor(baseLength/2),
                     yDelta = Math.floor(baseLength/2);
             
-                var pointDistance = function(x1, y1, x2, y2) {
-                    return Math.sqrt((x1-x2)**2 + (y1-y2)**2);
-                };
+                
 
                 var maxDistance = pointDistance(x, y, x-xDelta - 0.5, y-yDelta - 0.5);
                 var layerSize = 2 * xDelta;
@@ -164,6 +159,9 @@ class MultiLineCollection {
         });
         return map;
     };
+};
+var pointDistance = function(x1, y1, x2, y2) {
+    return Math.sqrt((x1-x2)**2 + (y1-y2)**2);
 };
 // Load csv data and compute functions to sample
 $.ajax({
@@ -265,7 +263,7 @@ function plotContours() {
     };
     var thresholds = [];
     var mean = d3.mean(values);
-    thresholds.push(150);
+    thresholds.push(200);
     for (var i = 4; i <= 16; i += 4) {
         thresholds.push(mean * i);
     };
@@ -306,8 +304,21 @@ d3.json("../shapefiles/land.json", function(error, data) {
         .attr("d", path(data))
         .style("fill", d3.hsv(122, .5, .74));
 
-    plotContours();
-
+    //plotContours();
+    trackCollection.multiLines.forEach(function(trk) {
+        //console.log(trk.generateSamplePointsByTime());
+        d3.select("svg").selectAll("dot")
+            .data(trk.genSamplePointsByDistance(1/10)).enter()
+            .append("circle")
+            .attr("cx", function(d) {
+                return projection([d.x, d.y])[0];
+            })
+            .attr("cy", function(d) { 
+                return projection([d.x, d.y])[1];
+            })
+            .attr("r", "2px")
+            .attr("fill", "red");
+    });
     /* Code to show the base spaghetti plot
     window.trackCollection.multiLines.forEach(function(multiLine) {
         d3.select("svg").selectAll("lines")
