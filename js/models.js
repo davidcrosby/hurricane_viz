@@ -55,9 +55,27 @@ class multiLine {
     };
 
     genSamplePointsByDistance(distance) {
+        var out = [];
         this.lines.forEach(function(line) {
-            var numPoints = 
+            var start = new Point(projection([line.start.x, line.start.y])),
+                end = new Point(projection([line.end.x, line.end.y]));
+            var point = new Point(projection([line.start.x, line.start.y]));
+            var time = line.range[0]; // start time
+            var disp = new Point([
+                end.x - start.x,
+                end.y - start.y
+            ]);
+            var lineLength = pointDistance(start.x, start.y, end.x, end.y);
+            var count = Math.round(lineLength/distance);
+            disp.scale((distance)/lineLength)
+            for(var i = 0; i < count; i++) {
+                out.push([point, time]);
+                point = point.add(disp);
+                var pd = pointDistance(start.x, start.y, point.x, point.y);
+                time = line.range[0] + line.length * (pd/lineLength);
+            };
         });
+        return out;
     };
 
     generateSamplePointsByTime() {
@@ -93,7 +111,8 @@ class MultiLineCollection {
         return output;
     }
 
-    createSplattingMap() {
+    createSplattingMap(samplingType) {
+        // samplingType : String : {"time", "distance"}
         // Sample pts for each track and update the map with their splats
         var map = {}
         for (var i = 0; i < width; i++) {
@@ -106,10 +125,18 @@ class MultiLineCollection {
         var volume = 4000;
         var max_size = Math.floor(Math.sqrt(3*volume)) // when height = 1
         this.multiLines.forEach(function(track) {
-            var trkPoints = track.generateSamplePointsByTime()
+            if (samplingType === "time") {
+                var trkPoints = track.generateSamplePointsByTime()
+            } else if (samplingType === "distance") {
+                var trkPoints = track.genSamplePointsByDistance(1);
+            }
             trkPoints.forEach(function(pointTime) {
                 var [p, time] = pointTime
-                var [x, y] = projection([p.x, p.y]).map(x => Math.round(x));
+                if (samplingType === "time") {
+                    var [x, y] = projection([p.x, p.y]).map(x => Math.round(x));
+                } else if (samplingType === "distance") {
+                    var [x, y] = [p.x, p.y].map(x => Math.round(x));
+                };
 
                 // length and width
                 var baseLength = Math.round(1 + (time/120)*max_size);
@@ -252,7 +279,7 @@ function thresholdColor(thresholdValue, maxThresholdValue) {
 };
 
 function plotContours() {
-    var map = window.trackCollection.createSplattingMap();
+    var map = window.trackCollection.createSplattingMap("distance");
 
     // construct density values for contour plotting
     var values = new Array(width * height);
@@ -304,21 +331,51 @@ d3.json("../shapefiles/land.json", function(error, data) {
         .attr("d", path(data))
         .style("fill", d3.hsv(122, .5, .74));
 
-    //plotContours();
+    plotContours();
+    
+    /* Show distance based sampling:
+    var color = d3.hsv(0, 1, 1);
+    var counter = 0;
     trackCollection.multiLines.forEach(function(trk) {
         //console.log(trk.generateSamplePointsByTime());
         d3.select("svg").selectAll("dot")
-            .data(trk.genSamplePointsByDistance(1/10)).enter()
+            .data(trk.genSamplePointsByDistance(5)).enter()
             .append("circle")
             .attr("cx", function(d) {
-                return projection([d.x, d.y])[0];
+                d = d[0];
+                //console.log(Math.round(d.x));
+                return Math.round(d.x);
             })
             .attr("cy", function(d) { 
-                return projection([d.x, d.y])[1];
+                d = d[0];
+                return Math.round(d.y);
             })
             .attr("r", "2px")
-            .attr("fill", "red");
+            .attr("fill", color);
+        counter += 4;
+        color = d3.hsv(counter, 1, 1);
     });
+    */
+   /* time based splatting plot
+   var color = d3.hsv(0, 1, 1);
+   var counter = 0;
+   trackCollection.multiLines.forEach(function(trk) {
+       d3.select("svg").selectAll("dot")
+           .data(trk.generateSamplePointsByTime()).enter()
+           .append("circle")
+           .attr("cx", function(d) {
+               d = d[0];
+               return projection([d.x, d.y])[0];
+           })
+           .attr("cy", function(d) {
+               d = d[0];
+               return projection([d.x, d.y])[1];
+           })
+           .attr("r", "2px")
+           .attr("fill", color);
+           counter += 4;
+           color = d3.hsv(counter, 1, 1);
+   });
     /* Code to show the base spaghetti plot
     window.trackCollection.multiLines.forEach(function(multiLine) {
         d3.select("svg").selectAll("lines")
