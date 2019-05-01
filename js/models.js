@@ -23,9 +23,10 @@ class Point {
 }
 
 class LineSegment {
-    constructor(start, end, range) {
+    constructor(start, end, range, wind) {
         this.start = start;
         this.end = end;
+        this.wind = wind;
         this.range = range; // [start_time, end_time]
         this.length = (range[1] - range[0]);
     }
@@ -53,6 +54,18 @@ class multiLine {
     constructor(lines) {
         this.lines = lines;
     };
+
+    resolveWind() {
+        this.lines.forEach(function(line) {
+            if(isNaN(line.wind[0])) {
+                line.wind[0] = window.windTotals[line.range[0]]
+            };
+            if(isNaN(line.wind[1])) {
+                line.wind[1] = window.windTotals[line.range[1]]
+            };
+            console.log(line.wind);
+        });
+    }
 
     genSamplePointsByDistance(distance) {
         var out = [];
@@ -192,7 +205,7 @@ var pointDistance = function(x1, y1, x2, y2) {
 };
 // Load csv data and compute functions to sample
 $.ajax({
-    url:"../model_data/harvey.csv",
+    url:"../model_data/harvey_wind.csv",
     dataType: "text"
 }).done(readData)
 
@@ -212,8 +225,16 @@ function findNextValidPoint(startTime, track) {
 
 function readData(data) {
     // TODO: rewrite this and clean it up
+    // TODO: reconsider wind when data missing, how to handle
     var trackData = d3.dsvFormat("|").parse(data);
     // window makes it global even tho its defined inside a function
+
+    // Keep track of winds at each point to get an average
+    window.windTotals = {};
+    for(var i = 0; i <= 120; i+=6) {
+        windTotals[i] = [];
+    }
+
     window.trackCollection = new MultiLineCollection([]) // Models -> Piecewise linear functions
     trackData.forEach(function(track) {
 
@@ -230,21 +251,28 @@ function readData(data) {
                     continue; // Skip descriptions and ends
                 } else {
                     var startTime = parseInt(property);
-                    var startPoint = new Point(latlong2longlat(track[property].split(" ")));
+                    var data = track[property].split(" ");
+                    var startPoint = new Point(latlong2longlat([data[0], data[1]]));
+                    var startWind = parseInt(data[2]);
                     if (!firstLineDrawn) { // Add line to measuredStart
                         var ms = new Point(latlong2longlat(measuredStart));
-                        trackLines.push(new LineSegment(ms, startPoint, [0,startTime]))
+                        trackLines.push(new LineSegment(ms, startPoint, [0,startTime], [measuredStart[2], startWind]))
+                        if(startWind)
+                            windTotals[startTime].push(startWind);
                         firstLineDrawn = true;
                     };
 
                     // Find next timestep that has valid position data
                     // Sometimes the track might not be defined every 6 hours
                     var endTime = findNextValidPoint(startTime, track);
-
                     // check if we are at the last point, mainly for tracks that end before t=120
                     if (endTime != "") {
-                        var endPoint = new Point(latlong2longlat(track[endTime].split(" ")));
-                        trackLines.push(new LineSegment(startPoint, endPoint, [startTime, parseInt(endTime)]));
+                        var endData = track[endTime].split(" ");
+                        var endWind = parseInt(endData[2]);
+                        if(endWind)
+                            windTotals[endTime].push(endWind);
+                        var endPoint = new Point(latlong2longlat([endData[0], endData[1]]));
+                        trackLines.push(new LineSegment(startPoint, endPoint, [startTime, parseInt(endTime)], [startWind, endWind]));
                     } else {
                         continue;
                     };
@@ -252,6 +280,13 @@ function readData(data) {
             };
         };
         window.trackCollection.add(new multiLine(trackLines));
+
+    });
+    for(var i = 0; i <= 120; i+=6) {
+        window.windTotals[i] = d3.mean(windTotals[i]);
+    };
+    window.trackCollection.multiLines.forEach(function(line) {
+        line.resolveWind();
     });
 };
 
@@ -265,7 +300,7 @@ var width = 1000,
     height = 600;
 
 // TODO: Don't hard code projection parameters
-var measuredStart = [13.8, 67]
+var measuredStart = [13.8, 67, 35]
 var centerCoords = [15, 85]
 var projection = d3.geoEquirectangular()
     .center(latlong2longlat(centerCoords))
@@ -279,7 +314,7 @@ function thresholdColor(thresholdValue, maxThresholdValue) {
 };
 
 function plotContours() {
-    var map = window.trackCollection.createSplattingMap("distance");
+    var map = window.trackCollection.createSplattingMap("time");
 
     // construct density values for contour plotting
     var values = new Array(width * height);
