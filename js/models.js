@@ -47,6 +47,13 @@ class LineSegment {
         displacement.scale(normalizedTime/this.length);
         return this.start.add(displacement);
     };
+
+    windAt(time) {
+        var [ws, we] = this.wind;
+        var normalizedTime = (time - this.range[0]);
+        var out = ws + (we - ws)*normalizedTime/this.length;
+        return ws + (we - ws)*normalizedTime/this.length;
+    }
 };
 
 class multiLine {
@@ -63,11 +70,10 @@ class multiLine {
             if(isNaN(line.wind[1])) {
                 line.wind[1] = window.windTotals[line.range[1]]
             };
-            console.log(line.wind);
         });
     }
 
-    genSamplePointsByDistance(distance) {
+    generateSamplePointsByDistance(distance) {
         var out = [];
         this.lines.forEach(function(line) {
             var start = new Point(projection([line.start.x, line.start.y])),
@@ -93,11 +99,11 @@ class multiLine {
 
     generateSamplePointsByTime() {
         var output = []
-        for (var t = 0; t < 120; t += 1) {
+        for (var t = 0; t < 120; t += .1) {
             this.lines.forEach(function(line) {
                 if(line.definedAt(t)) {
                     var p = line.valueAt(t);
-                    output.push([p, t]);
+                    output.push([p, t, line.windAt(t)]);
                 };
             });
         };
@@ -126,12 +132,15 @@ class MultiLineCollection {
 
     createSplattingMap(samplingType) {
         // samplingType : String : {"time", "distance"}
-        // Sample pts for each track and update the map with their splats
-        var map = {}
+        // Sample pts for each track and update the dmap with their splats
+        var dmap = {}
+        var windmap = {};
         for (var i = 0; i < width; i++) {
-            map[i] = {}
+            dmap[i] = {};
+            windmap[i] = {};
             for (var j=0; j < height; j++) {
-                map[i][j] = 0;
+                dmap[i][j] = 0;
+                windmap[i][j] = [0, 0];
             };
         };
 
@@ -141,10 +150,10 @@ class MultiLineCollection {
             if (samplingType === "time") {
                 var trkPoints = track.generateSamplePointsByTime()
             } else if (samplingType === "distance") {
-                var trkPoints = track.genSamplePointsByDistance(1);
+                var trkPoints = track.generateSamplePointsByDistance(1);
             }
             trkPoints.forEach(function(pointTime) {
-                var [p, time] = pointTime
+                var [p, time, wind] = pointTime
                 if (samplingType === "time") {
                     var [x, y] = projection([p.x, p.y]).map(x => Math.round(x));
                 } else if (samplingType === "distance") {
@@ -156,7 +165,7 @@ class MultiLineCollection {
                 // V = lwh/3
                 var height = 3 * volume / (baseLength**2)
                 if (baseLength == 1) {
-                    map[x][y] = height;
+                    dmap[x][y] = height;
                     return;
                 };
                 if(x < baseLength/2 || y < baseLength/2) 
@@ -176,7 +185,7 @@ class MultiLineCollection {
                     if (x != xp && y != yp) {
                         var pd = pointDistance(xp, yp, x - xDelta - 0.5, y - yDelta - 0.5);
                     } else {
-                        map[xp][yp] += height;
+                        dmap[xp][yp] += height;
                         break;
                     };
                     for(var i = xp; i <= xp + layerSize; i++) {
@@ -184,11 +193,19 @@ class MultiLineCollection {
                             if (i != xp && j != yp && i != xp+layerSize && j != yp+layerSize)
                                 continue;
                             var heightAtThisPoint = height*(pd/maxDistance);
-                            if(map[i][j]) {
-                                map[i][j] += heightAtThisPoint;
+                            // update density
+                            if(dmap[i][j]) {
+                                dmap[i][j] += heightAtThisPoint;
                             } else {
-                                map[i][j] = heightAtThisPoint;
+                                dmap[i][j] = heightAtThisPoint;
                             };
+                            // update wind value
+                            if (windmap[i][j]) {
+                                windmap[i][j][0] += wind;
+                                windmap[i][j][1] += 1
+                            } else {
+                                windmap[i][j] = [wind, 1];
+                            }
                         };
                     };
                     layerSize -= 2;
@@ -197,7 +214,26 @@ class MultiLineCollection {
                 };
             });
         });
-        return map;
+        // replace wind sum with average
+        for (var x in windmap) {
+            if (windmap.hasOwnProperty(x)) {
+                for (var y in windmap[x]) {
+                    if(windmap[x].hasOwnProperty(y)) {
+                        // min threshold
+                        if (dmap[x][y] < 200) {
+                            windmap[x][y] = 0;
+                            continue;
+                        }
+                        if (windmap[x][y] && windmap[x][y][1] !== 0) {
+                            windmap[x][y] = windmap[x][y][0]/windmap[x][y][1];
+                        } else {
+                            windmap[x][y] = 0;
+                        }
+                    }
+                }
+            }
+        }
+        return [dmap, windmap];
     };
 };
 var pointDistance = function(x1, y1, x2, y2) {
@@ -308,19 +344,141 @@ var projection = d3.geoEquirectangular()
 
 var path = d3.geoPath().projection(projection);
 
-function thresholdColor(thresholdValue, maxThresholdValue) {
+function thresholdColor(thresholdValue, maxThresholdValue, index, scheme) {
     var ratio = thresholdValue/maxThresholdValue;
-    return d3.hsv(0, 1, .65 + Math.min(.35, ratio));
+    if (scheme == "value") {
+        var ratio = thresholdValue/maxThresholdValue;
+        return d3.hsv(0, 1, .65 + Math.min(.35, ratio));
+    };
+    if (scheme == "colors") {
+        var ca = [20, 15, 5, 0, 0];
+        return d3.hsv(ca[index], 1, 1);
+    };
+    if (scheme == "saturation") {
+        return d3.hsv(0, .6 + Math.min(.4, ratio), 1);
+    };
+    if (scheme == "value+sat") {
+        return d3.hsv(0, .6 + ratio, .45 + ratio);
+    };
+    if (scheme == "color+sat") {
+        var ca = [20, 15, 5, 0, 0];
+        return d3.hsv(ca[index], .6 + Math.min(.4, ratio), 1);
+    };
+    if (scheme == "triple") {
+        var ca = [20, 15, 10, 5, 0];
+        return d3.hsv(ca[index], .8 + Math.min(.2, ratio), .8 + Math.min(.2, ratio));
+    };
+    // for overlaying wind speed
+    if (scheme == "darkness") {
+        return d3.hsv(0, 0, .05);//(ratio * .4));
+    };
 };
 
+
+function plotHeatMap() {
+    var beaufortColors = {
+        1: "#adf1f9",
+        4: "#96f7dc",
+        7: "#96f7b4",
+        11: "#6ff4gf",
+        17: "#73ed14",
+        22: "#a4ed14",
+        28: "#daed14",
+        34: "#edc214",
+        41: "#ed8f12",
+        48: "#ed6312",
+        56: "#ed2712",
+        64: "#d50e2d"
+    }
+    var getColorByWind = function(wind) {
+        var last = beaufortColors[64];
+        for(var key in beaufortColors) {
+            if (wind < key) {
+                return beaufortColors[key]
+            }
+            last = beaufortColors[key];
+        }
+        return last;
+    }
+    // d -> density, w -> width
+    var [dmap, windmap] = window.trackCollection.createSplattingMap("time");
+    var wvalues = new Array(width * height);
+    for(var i =0;i<width;i++){
+        for(var j =0;j<height;j++){
+            wvalues[i + j*width] = windmap[i][j];
+        };
+    };
+    var dvalues = new Array(width * height);
+    for(var i =0;i<width;i++) {
+        for(var j =0;j<height;j++) {
+            dvalues[i + j*width] = dmap[i][j];
+        };
+    };
+    // Construct and plot wind speed contours
+    var wthresholds = [1,4,7,11,17,22,28,34,41,48,56,64];
+    var wcontours = d3.contours().size([width, height]).thresholds(wthresholds)(wvalues);
+    for (var i =0;i<wcontours.length;i++){
+        wcontours[i].coordinates.forEach(function(polygons){
+            for(var j=0;j<polygons.length;j++){
+                var polygon = polygons[j];
+                d3.select("svg")
+                    .append("polygon")
+                    .attr("points", polygon.map(function(e) {
+                        return e.join(",");
+                    }).join(" "))
+                    .attr("fill", getColorByWind(wthresholds[i]))
+                    .attr("stroke-width", 0)
+                    .attr("opacity", .35);
+
+            }
+        })
+    }
+
+    // Construct and plot uncertainty countours
+    var dthresholds = [];
+    var mean = d3.mean(dvalues);
+    dthresholds.push(200);
+    for (var i = 4; i <= 16; i += 4) {
+        dthresholds.push(mean * i);
+    };
+    var dcontours = d3.contours().size([width, height]).thresholds(dthresholds)(dvalues);
+    var dasharrayValues = function(thresholdValue) {
+        var maxThresholdValue = d3.max(dthresholds);
+        var ratio = thresholdValue/maxThresholdValue;
+        var pixelsOff = Math.round(30 - (ratio * 25));
+        var pixelsOn = Math.max(7, Math.round(ratio * 30));
+        var out = parseInt(pixelsOn) + "," + parseInt(pixelsOff);
+        return out;
+    }
+    var maxThresholdValue = d3.max(dthresholds);
+    for (var i = 0; i < dcontours.length; i++) {
+        // coordinates is a list of polygons
+        dcontours[i].coordinates.forEach(function(polygons){
+            for (var j = 0; j < polygons.length; j++) {
+                var polygon = polygons[j];
+                d3.select("svg")
+                    .append("polygon")
+                    .attr("points", polygon.map(function(e) {
+                        return e.join(",");
+                    }).join(" "))
+                    .attr("stroke", "black")
+                    .attr("stroke-width", 2)
+                    .attr("stroke-dasharray", dasharrayValues(dthresholds[i]))
+                    .attr("fill-opacity", .1)
+                    .attr("stroke-opacity", .7)
+                    .attr("fill", thresholdColor(dthresholds[i], maxThresholdValue, i, "darkness"));
+            }
+        })
+    }
+}
 function plotContours() {
-    var map = window.trackCollection.createSplattingMap("time");
+    var [dmap, windmap] = window.trackCollection.createSplattingMap("time");
 
     // construct density values for contour plotting
     var values = new Array(width * height);
     for (var i = 0; i < width; ++i) {
         for(var j = 0; j < height; ++j) {
-            values[i + j * width] = map[i][j];
+            values[i + j * width] = dmap[i][j];
         };
     };
     var thresholds = [];
@@ -340,15 +498,15 @@ function plotContours() {
                     .attr("points", polygon.map(function(e) {
                         return e.join(",");
                     }).join(" "))
-                    .attr("fill", thresholdColor(thresholds[i], d3.max(thresholds)))
                     .attr("stroke", "black")
-                    .attr("stroke-width", 1)
+                    .attr("stroke-width", 2)
+                    .attr("stroke-dasharray", "10,10")
                     .attr("opacity", .5)
+                    .attr("fill", thresholdColor(thresholds[i], d3.max(thresholds), i, "value+sat"));
             }
-        });
-    };
-};
-
+        })
+    }
+}
 d3.json("../shapefiles/land.json", function(error, data) {
     if (error) throw error; // oh no!
     // Fill the ocean
@@ -364,9 +522,10 @@ d3.json("../shapefiles/land.json", function(error, data) {
         .attr("height", height)
         .append("path")
         .attr("d", path(data))
-        .style("fill", d3.hsv(122, .5, .74));
+        .style("fill", "beige");
 
-    plotContours();
+    //plotContours();
+    plotHeatMap();
     
     /* Show distance based sampling:
     var color = d3.hsv(0, 1, 1);
@@ -374,7 +533,7 @@ d3.json("../shapefiles/land.json", function(error, data) {
     trackCollection.multiLines.forEach(function(trk) {
         //console.log(trk.generateSamplePointsByTime());
         d3.select("svg").selectAll("dot")
-            .data(trk.genSamplePointsByDistance(5)).enter()
+            .data(trk.generateSamplePointsByDistance(5)).enter()
             .append("circle")
             .attr("cx", function(d) {
                 d = d[0];
