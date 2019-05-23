@@ -62,6 +62,15 @@ class multiLine {
         this.lines = lines;
     };
 
+    valueAt(time) {
+        for(let index in this.lines) {
+            var line = this.lines[index];
+            if(line.definedAt(time)) {
+                return line.valueAt(time)
+            }
+        }
+        return undefined;
+    }
     resolveWind() {
         this.lines.forEach(function(line) {
             if(isNaN(line.wind[0])) {
@@ -128,6 +137,38 @@ class MultiLineCollection {
             output.push(...pts);
         };
         return output;
+    }
+
+    locationAverages() {
+        // gen list of location averages every 24 hours
+        var ret = [
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [0, 0]
+        ]
+        var counts = [0, 0, 0, 0, 0]
+        for(let index in this.multiLines) {
+            var time = 24;
+            var ml = this.multiLines[index];
+            while(time <= 120) {
+                var reti = time/24 - 1;
+                var p = ml.valueAt(time);
+                time += 24;
+                if(p === undefined) {
+                    continue;
+                }
+                ret[reti][0] += p.x;
+                ret[reti][1] += p.y;
+                counts[reti] += 1;
+            }
+        }
+        for(let index in ret) {
+            ret[index][0] /= counts[index];
+            ret[index][1] /= counts[index];
+        }
+        return ret;
     }
 
     createSplattingMap(samplingType) {
@@ -241,7 +282,7 @@ var pointDistance = function(x1, y1, x2, y2) {
 };
 // Load csv data and compute functions to sample
 $.ajax({
-    url:"../model_data/harvey_wind.csv",
+    url:"../model_data/florence.csv",
     dataType: "text"
 }).done(readData)
 
@@ -318,8 +359,10 @@ function readData(data) {
         window.trackCollection.add(new multiLine(trackLines));
 
     });
+    console.log(window.trackCollection.multiLines.length)
     for(var i = 0; i <= 120; i+=6) {
         window.windTotals[i] = d3.mean(windTotals[i]);
+        //window.windTotals[i] = d3.max(windTotals[i]);
     };
     window.trackCollection.multiLines.forEach(function(line) {
         line.resolveWind();
@@ -336,11 +379,18 @@ var width = 1000,
     height = 600;
 
 // TODO: Don't hard code projection parameters
-var measuredStart = [13.8, 67, 35]
-var centerCoords = [15, 85]
+//
+// HARVEY
+// var measuredStart = [13.8, 67, 35]
+// var centerCoords = [15, 85]
+// Florence -- removed clp5/odc5 outliers
+var measuredStart = [30.4, 71.9, 110]
+var centerCoords = [35, 80]
+//
+//
 var projection = d3.geoEquirectangular()
     .center(latlong2longlat(centerCoords))
-    .scale(1400);
+    .scale(2400);
 
 var path = d3.geoPath().projection(projection);
 
@@ -400,12 +450,13 @@ function plotHeatMap() {
         }
         return last;
     }
+    var minDensityThreshold = 350;
     // d -> density, w -> width
     var [dmap, windmap] = window.trackCollection.createSplattingMap("time");
     var wvalues = new Array(width * height);
     for(var i =0;i<width;i++){
         for(var j =0;j<height;j++){
-            wvalues[i + j*width] = windmap[i][j];
+            wvalues[i + j*width] = dmap[i][j] > minDensityThreshold ? windmap[i][j] : 0;
         };
     };
     var dvalues = new Array(width * height);
@@ -417,6 +468,7 @@ function plotHeatMap() {
     // Construct and plot wind speed contours
     var wthresholds = [1,4,7,11,17,22,28,34,41,48,56,64];
     var wcontours = d3.contours().size([width, height]).thresholds(wthresholds)(wvalues);
+    console.log(wcontours);
     for (var i =0;i<wcontours.length;i++){
         wcontours[i].coordinates.forEach(function(polygons){
             for(var j=0;j<polygons.length;j++){
@@ -428,7 +480,7 @@ function plotHeatMap() {
                     }).join(" "))
                     .attr("fill", getColorByWind(wthresholds[i]))
                     .attr("stroke-width", 0)
-                    .attr("opacity", .35);
+                    .attr("opacity", .1);
 
             }
         })
@@ -437,8 +489,8 @@ function plotHeatMap() {
     // Construct and plot uncertainty countours
     var dthresholds = [];
     var mean = d3.mean(dvalues);
-    dthresholds.push(200);
-    for (var i = 4; i <= 16; i += 4) {
+    dthresholds.push(minDensityThreshold);
+    for (var i = 2; i <= 10; i += 4) {
         dthresholds.push(mean * i);
     };
     var dcontours = d3.contours().size([width, height]).thresholds(dthresholds)(dvalues);
@@ -451,7 +503,14 @@ function plotHeatMap() {
         return out;
     }
     var maxThresholdValue = d3.max(dthresholds);
+    var strokeColor = function(i) {
+        //var val = [.6, .4, .35, .25, .2];
+        //var val = [1, .7, .5, .3];
+        var val = [.7, .5, .4, .1];
+        return d3.hsv(0,0, val[i]);
+    }
     for (var i = 0; i < dcontours.length; i++) {
+        console.log(i)
         // coordinates is a list of polygons
         dcontours[i].coordinates.forEach(function(polygons){
             for (var j = 0; j < polygons.length; j++) {
@@ -461,11 +520,12 @@ function plotHeatMap() {
                     .attr("points", polygon.map(function(e) {
                         return e.join(",");
                     }).join(" "))
-                    .attr("stroke", "black")
+                    .attr("stroke", strokeColor(i))
                     .attr("stroke-width", 2)
                     .attr("stroke-dasharray", dasharrayValues(dthresholds[i]))
-                    .attr("fill-opacity", .1)
+                    .attr("fill-opacity", 0)
                     .attr("stroke-opacity", .7)
+                    .attr("fill", "none")
                     .attr("fill", thresholdColor(dthresholds[i], maxThresholdValue, i, "darkness"));
             }
         })
@@ -474,6 +534,7 @@ function plotHeatMap() {
 function plotContours() {
     var [dmap, windmap] = window.trackCollection.createSplattingMap("time");
 
+    var minDensityThreshold = 500;
     // construct density values for contour plotting
     var values = new Array(width * height);
     for (var i = 0; i < width; ++i) {
@@ -483,7 +544,7 @@ function plotContours() {
     };
     var thresholds = [];
     var mean = d3.mean(values);
-    thresholds.push(200);
+    thresholds.push(minDensityThreshold);
     for (var i = 4; i <= 16; i += 4) {
         thresholds.push(mean * i);
     };
@@ -525,8 +586,73 @@ d3.json("../shapefiles/land.json", function(error, data) {
         .style("fill", "beige");
 
     //plotContours();
-    plotHeatMap();
-    
+    //plotHeatMap();
+
+    var start = projection(latlong2longlat([measuredStart[0], measuredStart[1]]));
+    d3.select("svg")
+        .append("svg:image")
+        .attr("x", start[0]-20)
+        .attr("y", start[1]-20)
+        .attr("width", 40)
+        .attr("height", 40)
+        .attr("xlink:href", "hurricane_glyph.png")
+        .attr("opacity", .8);
+
+    var ps = window.trackCollection.locationAverages().map(projection);
+    var dayLines = [];
+    var direction = 1; // positive up, negative down
+    for(let p =0;p<ps.length;p++){
+        var pt = ps[p];
+        var offset = direction*(60 + 40 * (p));
+        dayLines.push([pt, [pt[0], pt[1] + offset], direction, (p+1)])
+        direction *= -1;
+    };
+    d3.select("svg").selectAll("dot")
+        .data(ps).enter()
+        .append("circle")
+        .attr("cx", function(d) {
+            return d[0];
+        })
+        .attr("cy", function(d) {
+            return d[1];
+        })
+        .attr("fill", "black")
+        .attr("r", "3px");
+    d3.select("svg").selectAll("lines")
+        .data(dayLines).enter()
+        .append("line")
+        .attr("x1", function(d) {
+            return d[0][0];
+        })
+        .attr("y1", function(d) {
+            return d[0][1];
+        })
+        .attr("x2", function(d) {
+            return d[1][0];
+        }) 
+        .attr("y2", function(d) {
+            return d[1][1];
+        })
+        .attr("stroke-width", 2)
+        .attr("stroke", "black")
+    d3.select("svg").selectAll("text")
+        .data(dayLines).enter()
+        .append("text")
+        .attr("x", function(d) {
+            return d[1][0] - 10;
+        })
+        .attr("y", function(d) {
+            if(d[2] < 0) {
+                return d[1][1] + 5*d[2];
+            } else {
+                console.log(d[2]);
+                return d[1][1] + 15*d[2];
+            }
+        })
+        .style("font-size", "16px")
+        .text(function(d) {
+            return "Day " + String(d[3])
+        });
     /* Show distance based sampling:
     var color = d3.hsv(0, 1, 1);
     var counter = 0;
@@ -569,8 +695,6 @@ d3.json("../shapefiles/land.json", function(error, data) {
            .attr("fill", color);
            counter += 4;
            color = d3.hsv(counter, 1, 1);
-   });
-    /* Code to show the base spaghetti plot
     window.trackCollection.multiLines.forEach(function(multiLine) {
         d3.select("svg").selectAll("lines")
             .data(multiLine.lines).enter()
@@ -591,8 +715,9 @@ d3.json("../shapefiles/land.json", function(error, data) {
                 var p = d.end;
                 return projection([p.x, p.y])[1];
             })
-            .attr("stroke-width", 0.4)
+            .attr("stroke-width", 1)
             .attr("stroke", "blue")
     });
-    */
+   
+*/
 });
